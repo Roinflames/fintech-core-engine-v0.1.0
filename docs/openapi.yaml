@@ -1,0 +1,1014 @@
+openapi: 3.0.3
+info:
+  title: Fintech Core Engine API
+  version: 0.1.3
+  description: |
+    Infraestructura financiera backend con ledger de doble entrada, wallets y APIs REST.
+
+    Todos los endpoints (excepto `/health`) requieren JWT Bearer con scopes en el payload:
+    ```json
+    { "sub": "userId", "scopes": ["wallets:create", "transactions:write", ...] }
+    ```
+
+servers:
+  - url: http://localhost:3000/v1
+    description: Local development
+  - url: http://localhost:3000
+    description: Health check (unversioned)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Health
+  - name: Tenants
+  - name: Wallets
+  - name: Transactions
+  - name: Value
+  - name: Compliance
+  - name: Integrations
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT firmado con `JWT_SECRET`. Payload debe incluir array `scopes`.
+        Scopes disponibles: `tenants:admin`,
+        `wallets:create`, `wallets:read`,
+        `transactions:write`, `transactions:read`, `value:issue`, `value:redeem`,
+        `compliance:read`, `compliance:write`,
+        `integrations:read`, `integrations:write`.
+
+  parameters:
+    walletId:
+      name: walletId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    transactionId:
+      name: transactionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Clave única por operación para garantizar idempotencia (UUID recomendado).
+      schema:
+        type: string
+        format: uuid
+        example: 550e8400-e29b-41d4-a716-446655440000
+
+  schemas:
+    # ── Requests ──────────────────────────────────────────────────────────────
+
+    CreateTenantRequest:
+      type: object
+      required: [name, country_code]
+      properties:
+        name:
+          type: string
+          description: Nombre del tenant.
+          example: Acme Fintech
+        country_code:
+          type: string
+          minLength: 2
+          maxLength: 2
+          description: Código ISO 3166-1 alpha-2 del país.
+          example: CL
+
+    CreateWalletRequest:
+      type: object
+      required: [tenant_id, owner_id, currency]
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+          example: a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11
+        owner_id:
+          type: string
+          example: user-123
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: CLP
+
+    TransferRequest:
+      type: object
+      required: [tenant_id, from_wallet_id, to_wallet_id, amount, currency]
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        from_wallet_id:
+          type: string
+          format: uuid
+        to_wallet_id:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          pattern: '^\d+(\.\d+)?$'
+          description: Monto positivo como string decimal.
+          example: "1000.00"
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: CLP
+
+    ValueOperationRequest:
+      type: object
+      required: [tenant_id, wallet_id, amount, currency]
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        wallet_id:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          pattern: '^\d+(\.\d+)?$'
+          description: Monto positivo como string decimal.
+          example: "500.00"
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: CLP
+
+    # ── Responses ─────────────────────────────────────────────────────────────
+
+    TenantResponse:
+      type: object
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        country_code:
+          type: string
+          minLength: 2
+          maxLength: 2
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Presente solo en GET (no en creación).
+
+    WalletResponse:
+      type: object
+      properties:
+        wallet_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        owner_id:
+          type: string
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        status:
+          type: string
+          enum: [active, suspended, closed]
+          example: active
+
+    BalanceResponse:
+      type: object
+      properties:
+        wallet_id:
+          type: string
+          format: uuid
+        available:
+          type: string
+          description: Balance disponible derivado del ledger.
+          example: "9500.00"
+        ledger:
+          type: string
+          description: Balance contable del ledger (igual a available en esta versión).
+          example: "9500.00"
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: CLP
+
+    TransferResponse:
+      type: object
+      properties:
+        transaction_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [posted]
+        type:
+          type: string
+          enum: [transfer]
+        batch_id:
+          type: string
+          format: uuid
+          description: ID del lote contable en el ledger.
+        tenant_id:
+          type: string
+          format: uuid
+        from_wallet_id:
+          type: string
+          format: uuid
+        to_wallet_id:
+          type: string
+          format: uuid
+        amount:
+          type: string
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+
+    TransactionResponse:
+      type: object
+      properties:
+        transaction_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [transfer, issue, redeem, reversal]
+        status:
+          type: string
+          enum: [pending, posted, reversed]
+        amount:
+          type: string
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        original_transaction_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Presente solo en transacciones de tipo `reversal`.
+        created_at:
+          type: string
+          format: date-time
+
+    ReversalResponse:
+      type: object
+      properties:
+        transaction_id:
+          type: string
+          format: uuid
+          description: ID de la nueva transacción de reverso.
+        original_transaction_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [posted]
+        batch_id:
+          type: string
+          format: uuid
+
+    ValueOperationResponse:
+      type: object
+      properties:
+        operation:
+          type: string
+          enum: [issue, redeem]
+        transaction_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [posted]
+        batch_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        wallet_id:
+          type: string
+          format: uuid
+        amount:
+          type: string
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+
+    # ── Integrations ──────────────────────────────────────────────────────────
+
+    ExternalTransferRequest:
+      type: object
+      required: [tenant_id, wallet_id, amount, currency, provider, external_reference]
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        wallet_id:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          pattern: '^\d+(\.\d+)?$'
+          example: "50000.00"
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: CLP
+        provider:
+          type: string
+          description: Identificador del conector. Usar `mock` para desarrollo.
+          example: mock
+        external_reference:
+          type: string
+          description: Referencia única del PSP/banco para esta operación.
+          example: PSP-TXN-98765
+
+    ExternalTransferResponse:
+      type: object
+      properties:
+        external_transfer_id:
+          type: string
+          format: uuid
+          description: ID interno del registro de transferencia externa.
+        transaction_id:
+          type: string
+          format: uuid
+        batch_id:
+          type: string
+          format: uuid
+        direction:
+          type: string
+          enum: [cash_in, cash_out]
+        status:
+          type: string
+          enum: [posted]
+        provider:
+          type: string
+        external_reference:
+          type: string
+        tenant_id:
+          type: string
+          format: uuid
+        wallet_id:
+          type: string
+          format: uuid
+        amount:
+          type: string
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+
+    ExternalTransferDetail:
+      type: object
+      properties:
+        external_transfer_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        wallet_id:
+          type: string
+          format: uuid
+        transaction_id:
+          type: string
+          format: uuid
+        provider:
+          type: string
+        external_reference:
+          type: string
+        direction:
+          type: string
+          enum: [cash_in, cash_out]
+        amount:
+          type: string
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        status:
+          type: string
+          enum: [pending, posted, failed]
+        created_at:
+          type: string
+          format: date-time
+
+    # ── Compliance ────────────────────────────────────────────────────────────
+
+    UpsertPolicyRequest:
+      type: object
+      required: [tenant_id, currency]
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          example: CLP
+        max_single_amount:
+          type: string
+          nullable: true
+          description: Monto máximo por transacción individual. null = sin límite.
+          example: "500000.00"
+        max_daily_wallet_debit:
+          type: string
+          nullable: true
+          description: Límite de débito diario acumulado por wallet. null = sin límite.
+          example: "1000000.00"
+        max_wallet_balance:
+          type: string
+          nullable: true
+          description: Balance máximo permitido en el wallet. null = sin límite.
+          example: "5000000.00"
+        requires_kyc:
+          type: boolean
+          default: false
+          description: Si true, el wallet debe tener kyc_verified=true para operar.
+
+    PolicyResponse:
+      type: object
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        max_single_amount:
+          type: string
+          nullable: true
+        max_daily_wallet_debit:
+          type: string
+          nullable: true
+        max_wallet_balance:
+          type: string
+          nullable: true
+        requires_kyc:
+          type: boolean
+
+    # ── Errors ────────────────────────────────────────────────────────────────
+
+    ErrorResponse:
+      type: object
+      properties:
+        statusCode:
+          type: integer
+          example: 400
+        message:
+          type: string
+          example: Insufficient funds
+        error:
+          type: string
+          example: Bad Request
+
+paths:
+  /tenants:
+    post:
+      summary: Crear tenant
+      description: |
+        Registra un nuevo tenant en el sistema.
+        Scope requerido: `tenants:admin`
+      tags: [Tenants]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTenantRequest'
+      responses:
+        '201':
+          description: Tenant creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResponse'
+        '400':
+          description: Parámetros inválidos o faltantes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Token JWT inválido o ausente
+        '403':
+          description: Scope `tenants:admin` requerido
+
+  /tenants/{tenantId}:
+    get:
+      summary: Obtener tenant
+      description: |
+        Retorna el detalle de un tenant por su ID.
+        Scope requerido: `tenants:admin`
+      tags: [Tenants]
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Detalle del tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResponse'
+        '401':
+          description: Token JWT inválido o ausente
+        '403':
+          description: Scope `tenants:admin` requerido
+        '404':
+          description: Tenant no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /health:
+    get:
+      summary: Healthcheck
+      tags: [Health]
+      security: []
+      responses:
+        '200':
+          description: Servicio en línea
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  db:
+                    type: string
+                    example: ok
+
+  /wallets:
+    post:
+      summary: Crear wallet
+      description: |
+        Crea un wallet con su cuenta contable principal (liability) asociada en el ledger.
+        Scope requerido: `wallets:create`
+      tags: [Wallets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWalletRequest'
+      responses:
+        '201':
+          description: Wallet creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletResponse'
+        '400':
+          description: Parámetros inválidos o faltantes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Token JWT inválido o ausente
+        '403':
+          description: Scope `wallets:create` requerido
+
+  /wallets/{walletId}:
+    get:
+      summary: Obtener wallet
+      description: |
+        Retorna el detalle de un wallet por su ID.
+        Scope requerido: `wallets:read`
+      tags: [Wallets]
+      parameters:
+        - $ref: '#/components/parameters/walletId'
+      responses:
+        '200':
+          description: Detalle del wallet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WalletResponse'
+        '401':
+          description: Token JWT inválido o ausente
+        '403':
+          description: Scope `wallets:read` requerido
+        '404':
+          description: Wallet no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /wallets/{walletId}/balance:
+    get:
+      summary: Consultar balance de wallet
+      description: |
+        Balance derivado del ledger de doble entrada.
+        El campo `available` refleja el saldo neto (créditos − débitos) de los asientos contables.
+        Scope requerido: `wallets:read`
+      tags: [Wallets]
+      parameters:
+        - $ref: '#/components/parameters/walletId'
+      responses:
+        '200':
+          description: Balance del wallet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceResponse'
+        '401':
+          description: Token JWT inválido o ausente
+        '403':
+          description: Scope `wallets:read` requerido
+        '404':
+          description: Wallet no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /transfers:
+    post:
+      summary: Crear transferencia entre wallets
+      description: |
+        Transfiere valor entre dos wallets del mismo tenant y moneda.
+        Valida fondos suficientes antes de postear.
+        Operación idempotente: reintentos con la misma `Idempotency-Key` devuelven el resultado original.
+        Scope requerido: `transactions:write`
+      tags: [Transactions]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+      responses:
+        '201':
+          description: Transferencia posteada en el ledger
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferResponse'
+        '400':
+          description: |
+            Fondos insuficientes, currency mismatch, wallet no existe o inactiva,
+            monto inválido, o header `Idempotency-Key` ausente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Token JWT inválido o ausente
+        '403':
+          description: Scope `transactions:write` requerido
+
+  /transactions/{transactionId}:
+    get:
+      summary: Obtener transacción
+      description: |
+        Retorna el detalle de una transacción por su ID.
+        Scope requerido: `transactions:read`
+      tags: [Transactions]
+      parameters:
+        - $ref: '#/components/parameters/transactionId'
+      responses:
+        '200':
+          description: Detalle de la transacción
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+        '401':
+          description: Token JWT inválido o ausente
+        '403':
+          description: Scope `transactions:read` requerido
+        '404':
+          description: Transacción no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /transactions/{transactionId}/reverse:
+    post:
+      summary: Reversar transacción por compensación
+      description: |
+        Crea una transacción de reverso que invierte los asientos contables originales.
+        Restricciones:
+        - Solo se pueden reversar transacciones en estado `posted`.
+        - Máximo un reverso por transacción original (enforced por índice único en DB).
+        Operación idempotente.
+        Scope requerido: `transactions:write`
+      tags: [Transactions]
+      parameters:
+        - $ref: '#/components/parameters/transactionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Reverso posteado en el ledger
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReversalResponse'
+        '400':
+          description: |
+            Transacción no encontrada, no está en estado `posted`,
+            ya tiene un reverso, o header `Idempotency-Key` ausente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Token JWT inválido o ausente
+        '403':
+          description: Scope `transactions:write` requerido
+
+  /value/issue:
+    post:
+      summary: Emitir valor interno
+      description: |
+        Acredita valor en un wallet desde la cuenta treasury interna del tenant.
+        Si la cuenta treasury no existe para la moneda, se crea automáticamente.
+        Operación idempotente.
+        Scope requerido: `value:issue`
+      tags: [Value]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValueOperationRequest'
+      responses:
+        '201':
+          description: Valor emitido y posteado en el ledger
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValueOperationResponse'
+        '400':
+          description: |
+            Currency mismatch, wallet no existe o inactiva,
+            monto inválido, o header `Idempotency-Key` ausente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Token JWT inválido o ausente
+        '403':
+          description: Scope `value:issue` requerido
+
+  /value/redeem:
+    post:
+      summary: Redimir valor interno
+      description: |
+        Debita valor de un wallet hacia la cuenta treasury interna del tenant.
+        Valida fondos suficientes antes de postear.
+        Operación idempotente.
+        Scope requerido: `value:redeem`
+      tags: [Value]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValueOperationRequest'
+      responses:
+        '201':
+          description: Valor redimido y posteado en el ledger
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValueOperationResponse'
+        '400':
+          description: |
+            Fondos insuficientes, currency mismatch, wallet no existe o inactiva,
+            monto inválido, o header `Idempotency-Key` ausente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Token JWT inválido o ausente
+        '403':
+          description: Scope `value:redeem` requerido
+
+  /compliance/policies:
+    post:
+      summary: Crear o actualizar política de compliance
+      description: |
+        Crea o actualiza (upsert) la política de compliance para un tenant y moneda.
+        Los campos numéricos aceptan `null` para deshabilitar ese límite.
+        Scope requerido: `compliance:write`
+      tags: [Compliance]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertPolicyRequest'
+      responses:
+        '201':
+          description: Política creada o actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyResponse'
+        '400':
+          description: tenant_id o currency faltantes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Token JWT inválido o ausente
+        '403':
+          description: Scope `compliance:write` requerido
+
+  /compliance/policies/{tenantId}/{currency}:
+    get:
+      summary: Obtener política de compliance
+      description: |
+        Retorna la política de compliance activa para un tenant y moneda.
+        Scope requerido: `compliance:read`
+      tags: [Compliance]
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: currency
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 3
+            example: CLP
+      responses:
+        '200':
+          description: Política de compliance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyResponse'
+        '401':
+          description: Token JWT inválido o ausente
+        '403':
+          description: Scope `compliance:read` requerido
+        '404':
+          description: Política no encontrada para ese tenant/moneda
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /integrations/cash-in:
+    post:
+      summary: Cash in — ingreso de fondos externos
+      description: |
+        Registra el ingreso de fondos desde un banco o PSP externo hacia un wallet.
+        El conector del `provider` valida la operación antes de postear.
+        Contabilidad: DR `EXTERNAL_CLEARING_{currency}` / CR wallet.
+        La combinación `(provider, external_reference, cash_in)` es única en la DB.
+        Operación idempotente.
+        Scope requerido: `integrations:write`
+      tags: [Integrations]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExternalTransferRequest'
+      responses:
+        '201':
+          description: Cash in posteado en el ledger
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalTransferResponse'
+        '400':
+          description: |
+            Provider desconocido, validación del conector fallida, currency mismatch,
+            wallet no existe o inactiva, monto inválido, compliance bloqueó la operación,
+            o header `Idempotency-Key` ausente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Token JWT inválido o ausente
+        '403':
+          description: Scope `integrations:write` requerido
+
+  /integrations/cash-out:
+    post:
+      summary: Cash out — egreso de fondos al exterior
+      description: |
+        Registra el egreso de fondos desde un wallet hacia un banco o PSP externo.
+        Valida fondos suficientes y pasa compliance antes de postear.
+        El conector del `provider` valida la operación.
+        Contabilidad: DR wallet / CR `EXTERNAL_CLEARING_{currency}`.
+        La combinación `(provider, external_reference, cash_out)` es única en la DB.
+        Operación idempotente.
+        Scope requerido: `integrations:write`
+      tags: [Integrations]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExternalTransferRequest'
+      responses:
+        '201':
+          description: Cash out posteado en el ledger
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalTransferResponse'
+        '400':
+          description: |
+            Provider desconocido, validación del conector fallida, fondos insuficientes,
+            currency mismatch, wallet no existe o inactiva, monto inválido,
+            compliance bloqueó la operación, o header `Idempotency-Key` ausente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Token JWT inválido o ausente
+        '403':
+          description: Scope `integrations:write` requerido
+
+  /integrations/transfers/{externalTransferId}:
+    get:
+      summary: Obtener transferencia externa
+      description: |
+        Retorna el detalle de una transferencia externa por su ID interno.
+        Scope requerido: `integrations:read`
+      tags: [Integrations]
+      parameters:
+        - name: externalTransferId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Detalle de la transferencia externa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalTransferDetail'
+        '401':
+          description: Token JWT inválido o ausente
+        '403':
+          description: Scope `integrations:read` requerido
+        '404':
+          description: Transferencia externa no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
